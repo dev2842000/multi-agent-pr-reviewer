@@ -7,6 +7,7 @@ on:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       pull-requests: write
       contents: read
@@ -18,23 +19,22 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json') }}
 
-      - name: Fetch PR diff
-        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr_diff.txt
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run multi-agent review
-        run: |
-          claude -p "The PR diff is saved at /tmp/pr_diff.txt. Use the review-orchestrator agent to run the full multi-agent review and output the review markdown." \
-            --allowedTools "Agent,Bash,Read" \
-            --max-turns 30 > /tmp/pr_review.md
+        run: node review.js "${{ github.event.pull_request.number }}"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-      - name: Post review comment
-        run: gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr_review.md
-        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SECURITY_MODEL: ${{ vars.SECURITY_MODEL || 'anthropic/claude-opus-4.7' }}
+          PERFORMANCE_MODEL: ${{ vars.PERFORMANCE_MODEL || 'anthropic/claude-haiku-4.5' }}
+          STYLE_MODEL: ${{ vars.STYLE_MODEL || 'anthropic/claude-haiku-4.5' }}
+          TESTS_MODEL: ${{ vars.TESTS_MODEL || 'anthropic/claude-haiku-4.5' }}
