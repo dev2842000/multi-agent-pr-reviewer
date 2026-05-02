@@ -1,67 +1,97 @@
-# PR Review Agent
+# Multi-Agent PR Reviewer
 
-A multi-agent code review system built with [Claude Code's Agent SDK](https://docs.anthropic.com/en/docs/claude-code/sub-agents).
+4 specialist AI agents run **in parallel** on every PR — Security, Performance, Style, and Tests — synthesize findings, and post a single review comment to GitHub automatically.
 
-4 specialist agents run **in parallel** on every PR — Security, Performance, Style, and Tests — then an orchestrator synthesizes their findings and posts a single review comment to GitHub.
+Built with the [Vercel AI SDK](https://sdk.vercel.ai) — supports Anthropic and OpenAI models. Each agent's model is configurable via environment variables with automatic fallback if a provider goes down.
 
 ## How it works
 
 ```
-You → review-orchestrator
-         ├── security-reviewer    ─┐
-         ├── performance-reviewer  ├─ run in parallel
-         ├── style-reviewer        │
-         └── test-reviewer        ─┘
-              ↓
-         Synthesized comment → posted to GitHub PR
+PR opened / commit pushed
+         ↓
+GitHub Actions triggers
+         ↓
+node review.js <PR>
+    ├── security-reviewer    (claude-opus-4.7)   ─┐
+    ├── performance-reviewer (claude-haiku-4.5)   ├─ parallel
+    ├── style-reviewer       (claude-haiku-4.5)   │
+    └── test-reviewer        (claude-haiku-4.5)  ─┘
+         ↓
+Synthesized comment → posted to GitHub PR
 ```
+
+If any provider fails, the agent automatically retries with a fallback model.
+
+## Agents
+
+| Agent | Default Model | Fallback | Checks |
+|-------|--------------|---------|--------|
+| Security | claude-opus-4.7 | claude-sonnet-4.6 | Injection, secrets, auth, OWASP Top 10 |
+| Performance | claude-haiku-4.5 | claude-sonnet-4.6 | N+1 queries, memory, algorithm complexity |
+| Style | claude-haiku-4.5 | claude-sonnet-4.6 | Naming, complexity, dead code, smells |
+| Tests | claude-haiku-4.5 | claude-sonnet-4.6 | Coverage gaps, weak assertions, edge cases |
 
 ## Setup
 
 **Prerequisites**
-- [Claude Code](https://claude.ai/code) installed
+- Node.js 18+
 - [GitHub CLI](https://cli.github.com/) authenticated (`gh auth login`)
+- Anthropic and/or OpenAI API key
 
 **Install**
 
-Copy the `.claude/agents/` folder into your project (or your home `~/.claude/agents/` to use across all repos):
+```bash
+git clone https://github.com/dev2842000/multi-agent-pr-reviewer
+cd multi-agent-pr-reviewer
+npm install
+```
+
+**Environment variables**
 
 ```bash
-cp -r .claude/agents/ /path/to/your-project/.claude/agents/
-# or globally:
-cp -r .claude/agents/ ~/.claude/agents/
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...          # optional, needed if using OpenAI models
 ```
 
 ## Usage
 
-Open Claude Code in your project and ask:
+**Manual**
 
-```
-Review PR #42
-```
-
-or
-
-```
-Review https://github.com/owner/repo/pull/42
+```bash
+./review.sh 42
 ```
 
-The orchestrator will:
-1. Fetch the PR diff via `gh`
-2. Spawn all 4 reviewers in parallel
-3. Post a consolidated comment to the PR
+**Automated (GitHub Actions)**
 
-## Agents
+Copy the workflow into your repo:
 
-| Agent | Model | Checks |
-|-------|-------|--------|
-| `review-orchestrator` | Sonnet | Coordinates everything, posts to GitHub |
-| `security-reviewer` | Sonnet | Injection, secrets, auth, OWASP Top 10 |
-| `performance-reviewer` | Haiku | N+1 queries, memory, algorithm complexity |
-| `style-reviewer` | Haiku | Naming, complexity, dead code, smells |
-| `test-reviewer` | Haiku | Coverage gaps, weak assertions, edge cases |
+```bash
+cp .github/workflows/pr-review.yml /path/to/your-repo/.github/workflows/
+cp review.js /path/to/your-repo/
+cp package.json /path/to/your-repo/
+```
 
-Security uses Sonnet for deeper reasoning. Performance/Style/Tests use Haiku — fast and cheap for pattern matching.
+Add secrets to your GitHub repo settings:
+- `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
+- `OPENAI_API_KEY` — optional, only needed if using OpenAI models
+
+Every PR opened or updated will now trigger an automatic review.
+
+## Switching models
+
+Override any agent's model via environment variables:
+
+```bash
+# Use GPT for security, keep Haiku for the rest
+SECURITY_MODEL=openai/gpt-4o node review.js 42
+
+# Use Opus for everything
+SECURITY_MODEL=anthropic/claude-opus-4.7 \
+PERFORMANCE_MODEL=anthropic/claude-opus-4.7 \
+node review.js 42
+```
+
+In GitHub Actions, set these as repository variables (`vars.SECURITY_MODEL` etc.) — no code changes needed.
 
 ## Example output
 
@@ -86,3 +116,11 @@ Security uses Sonnet for deeper reasoning. Performance/Style/Tests use Haiku —
 
 *Reviewed by 4 parallel agents: Security · Performance · Style · Tests*
 ```
+
+## Cost estimate
+
+| Setup | Cost per review |
+|-------|----------------|
+| All Haiku | ~$0.01 |
+| Security on Opus, rest on Haiku | ~$0.05–0.15 |
+| All Opus | ~$0.30–0.50 |
