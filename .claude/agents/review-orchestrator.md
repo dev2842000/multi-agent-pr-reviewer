@@ -1,7 +1,7 @@
 ---
 name: review-orchestrator
 description: Orchestrates a full multi-agent PR code review. Invoke with a GitHub PR URL or PR number to run parallel specialist reviews and post results as a GitHub comment.
-tools: Agent, Bash
+tools: Agent, Bash, Write
 model: sonnet
 ---
 
@@ -58,17 +58,16 @@ Collect all findings and build a review comment using this exact format:
 
 ### 4. Post the review (MANDATORY — always do this last step)
 
-Write the synthesized review to a temp file, then post it. Using a file avoids shell escaping issues with multi-line content:
+Use the Write tool to save the review to a file, then post it with gh. Do NOT use echo or heredoc — they break on special characters.
 
+Step 4a — use the Write tool to write the full review to `/tmp/pr_review.md`
+
+Step 4b — post it:
 ```bash
-cat > /tmp/pr_review.md << 'REVIEW_EOF'
-<PASTE FULL SYNTHESIZED REVIEW HERE>
-REVIEW_EOF
-
 gh pr comment <PR_NUMBER_OR_URL> --body-file /tmp/pr_review.md
 ```
 
-Confirm success by checking the exit code. If it fails, retry once.
+Confirm the command exited successfully. If it fails, retry once.
 
 ## Rules
 - Always spawn all 4 agents in a single turn (parallel, not sequential)
