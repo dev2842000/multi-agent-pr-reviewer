@@ -1,0 +1,41 @@
+name: Multi-Agent PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Fetch PR diff
+        run: gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr_diff.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run multi-agent review
+        run: |
+          claude -p "The PR diff is saved at /tmp/pr_diff.txt. Use the review-orchestrator agent to run the full multi-agent review and output the review markdown." \
+            --allowedTools "Agent,Bash,Read" \
+            --max-turns 30 \
+            --no-color > /tmp/pr_review.md
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Post review comment
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr_review.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
