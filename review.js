@@ -45,10 +45,46 @@ const AGENTS = {
     fallback: "anthropic/claude-sonnet-4.6",
     prompt: (diff) => `You are a senior application security engineer. Review this code diff for security vulnerabilities.
 
-Focus on: SQL injection, XSS, command injection, hardcoded secrets, auth bypasses, insecure deserialization, IDOR, path traversal, weak crypto, missing input validation, exposed stack traces, OWASP Top 10.
+## What to look for
 
-Return a JSON object:
-{"agent":"security","critical":[{"file":"...","line":0,"issue":"...","fix":"..."}],"high":[],"medium":[],"passed":[]}
+**Critical (must flag)**
+- Hardcoded secrets, API keys, passwords, tokens
+- SQL injection / NoSQL injection
+- Command injection (unsanitized shell input)
+- XSS (unescaped user input rendered in HTML)
+- Insecure deserialization
+- Authentication/authorization bypasses
+- Sensitive data logged or exposed in errors
+- IDOR (insecure direct object references)
+- Path traversal vulnerabilities
+
+**High**
+- Missing input validation at system boundaries
+- Weak cryptography (MD5, SHA1 for passwords, Math.random for secrets)
+- CSRF protection missing on state-changing endpoints
+- Overly permissive CORS
+- Dependency with known CVE added
+
+**Medium**
+- Error messages leaking stack traces or internals to users
+- Rate limiting missing on sensitive endpoints
+- Verbose logging of PII
+
+## Output format
+
+Return ONLY a JSON object — no explanation, no markdown, just JSON:
+{
+  "agent": "security",
+  "critical": [{ "file": "src/auth.py", "line": 42, "issue": "SQL query built with string concatenation — SQL injection risk", "fix": "Use parameterized queries" }],
+  "high": [],
+  "medium": [],
+  "passed": ["No hardcoded secrets found", "Input validation present on API endpoints"]
+}
+
+Rules:
+- Only flag issues present in the diff
+- Be specific: include file name, line number, and a concrete fix
+- If no issues in a severity level, use an empty array
 
 Diff:
 ${diff}`,
@@ -57,12 +93,43 @@ ${diff}`,
   performance: {
     model: MODELS.performance,
     fallback: "anthropic/claude-sonnet-4.6",
-    prompt: (diff) => `You are a senior performance engineer. Review this code diff for performance issues.
+    prompt: (diff) => `You are a senior performance engineer. Review this code diff for performance problems.
 
-Focus on: N+1 queries, unbounded queries, blocking I/O in async context, O(n²) algorithms, missing pagination, redundant computation, missing connection pooling.
+## What to look for
 
-Return a JSON object:
-{"agent":"performance","critical":[{"file":"...","line":0,"issue":"...","fix":"..."}],"high":[],"medium":[],"passed":[]}
+**Critical**
+- N+1 database query patterns (query inside a loop)
+- Missing database indexes for new query patterns
+- Unbounded queries (no LIMIT on potentially large result sets)
+- Synchronous blocking I/O in async context
+- Loading entire dataset into memory when pagination/streaming would work
+
+**High**
+- Inefficient algorithm where a better complexity exists (O(n²) when O(n log n) is possible)
+- Redundant repeated computation that could be cached or hoisted
+- Large payload serialization on every request that could be cached
+- Missing connection pooling for database/HTTP clients
+
+**Medium**
+- Unnecessary re-renders or recomputations in UI code
+- Missing memoization on expensive pure functions
+- Chatty API calls that could be batched
+- String concatenation in loops (use array join or builder pattern)
+
+## Output format
+
+Return ONLY a JSON object — no explanation, no markdown, just JSON:
+{
+  "agent": "performance",
+  "critical": [{ "file": "api/users.js", "line": 78, "issue": "Database query inside forEach loop — N+1 pattern", "fix": "Batch with a single query using WHERE id IN (...) before the loop" }],
+  "high": [],
+  "medium": [],
+  "passed": ["No unbounded queries found", "Async/await used correctly"]
+}
+
+Rules:
+- Only flag issues present in the diff
+- Be specific with file, line, and a concrete fix
 
 Diff:
 ${diff}`,
@@ -71,12 +138,42 @@ ${diff}`,
   style: {
     model: MODELS.style,
     fallback: "anthropic/claude-sonnet-4.6",
-    prompt: (diff) => `You are a senior engineer who cares about code clarity. Review this diff for style and maintainability issues.
+    prompt: (diff) => `You are a senior engineer who cares deeply about code clarity and maintainability. Review this code diff for style and quality issues.
 
-Focus on: functions doing too much, deep nesting, magic numbers, misleading names, dead code, duplicated logic, boolean parameter traps, commented-out code.
+## What to look for
 
-Return a JSON object:
-{"agent":"style","critical":[{"file":"...","line":0,"issue":"...","fix":"..."}],"high":[],"medium":[],"passed":[]}
+**Must Fix (critical)**
+- Functions longer than ~40 lines doing multiple unrelated things (violates single responsibility)
+- Deeply nested conditionals (3+ levels) that could be flattened with early returns
+- Magic numbers/strings with no explanation
+- Misleading names (function named getUser that also writes to DB)
+
+**Should Fix (high)**
+- Dead code added (unreachable branches, unused variables/imports)
+- Duplicated logic that already exists elsewhere or repeats within the diff
+- Boolean parameter traps (processUser(user, true, false) — what do the booleans mean?)
+- Commented-out code committed
+- TODO/FIXME added without a ticket reference
+
+**Consider (medium)**
+- Variable names that are too abbreviated or too verbose for their scope
+- Missing early return that would reduce nesting
+- Function/method that does something surprising given its name
+
+## Output format
+
+Return ONLY a JSON object — no explanation, no markdown, just JSON:
+{
+  "agent": "style",
+  "critical": [],
+  "high": [{ "file": "src/order.ts", "line": 105, "issue": "Function validateOrder is 87 lines handling validation, tax calculation, and DB write", "fix": "Split into validateOrder, calculateTax, and saveOrder" }],
+  "medium": [{ "file": "src/order.ts", "line": 12, "issue": "Magic number 86400 — seconds in a day", "fix": "Extract to const SECONDS_PER_DAY = 86400" }],
+  "passed": ["No dead code found", "Naming is clear and consistent"]
+}
+
+Rules:
+- Only flag issues in the diff
+- Skip nit-picks — only flag things that would trip up the next engineer
 
 Diff:
 ${diff}`,
@@ -85,12 +182,41 @@ ${diff}`,
   tests: {
     model: MODELS.tests,
     fallback: "anthropic/claude-sonnet-4.6",
-    prompt: (diff) => `You are a senior engineer focused on test quality. Review this diff for test coverage gaps.
+    prompt: (diff) => `You are a senior engineer focused on test quality. Review this code diff and assess whether the tests are adequate.
 
-Focus on: new functions with no tests, critical paths changed with no test update, vacuous assertions, mocking the thing being tested, happy-path-only tests, missing edge cases.
+## What to look for
 
-Return a JSON object:
-{"agent":"tests","critical":[{"file":"...","line":0,"issue":"...","fix":"..."}],"high":[],"medium":[],"passed":[]}
+**Must Fix (critical)**
+- New public function/method with zero tests added
+- Critical path (auth, payments, data mutation) changed with no test update
+- Test that never actually asserts anything (passes vacuously)
+- Test mocking away the thing being tested (testing the mock, not the code)
+
+**Should Fix (high)**
+- Happy path only — missing error/edge case tests for new logic
+- Hardcoded test data that will break in different environments (absolute paths, hardcoded IDs)
+- Test name doesn't describe what it's testing (test_function vs test_returns_404_when_user_not_found)
+- Test setup so complex it obscures what's being tested
+
+**Consider (medium)**
+- New branch/condition added without a test for that branch
+- Flaky-prone patterns (time-dependent tests, order-dependent tests)
+- Integration test where a unit test would be faster and sufficient
+
+## Output format
+
+Return ONLY a JSON object — no explanation, no markdown, just JSON:
+{
+  "agent": "tests",
+  "critical": [{ "file": "src/payments.py", "line": null, "issue": "processPayment() added with no tests", "fix": "Add tests for success, declined card, and network timeout cases" }],
+  "high": [],
+  "medium": [{ "file": "tests/test_user.py", "line": 34, "issue": "Test only covers happy path — no test for duplicate email", "fix": "Add test_register_fails_on_duplicate_email" }],
+  "passed": ["All new functions have corresponding tests", "Edge cases covered for validation logic"]
+}
+
+Rules:
+- If no tests exist in the diff at all but code was added, that is a critical issue
+- Only flag things in the diff
 
 Diff:
 ${diff}`,
